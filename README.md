@@ -13,6 +13,7 @@ list [<regex>]             List remote packages matching a regular
 install <package>          Install a package.
 remove <package>           Remove a package.
 create <prefix> <options>  Same as "prefix create".
+update <prefix> <options>  Same as "prefix update".
 run <prefix> <command>     Same as "prefix run".
 tricks <prefix> <verbs>    Same as "prefix tricks".
 clone <p1> <p2>            Same as "prefix clone".
@@ -22,8 +23,10 @@ help                       Display this help message.
 Usage: winemgr prefix <subcommand>
 
 Subcommands:
-create <prefix> <options>    Create a WINE prefix using an installed
+create <prefix> <options>    Create a new WINE prefix using an installed
                              package.
+update <prefix> <options>    Create a existing WINE prefix using an
+                             installed package.
 list [<regex>] [<options>]   List prefixes matching regular expressions.
                              used. If no regular expressions provided,
                              all results will be listed.
