@@ -60,6 +60,7 @@ my_die_usage() {
     echo 'install <package>          Install a package.'
     echo 'remove <package>           Remove a package.'
     echo 'create <prefix> <options>  Same as "prefix create".'
+    echo 'update <prefix> <options>  Same as "prefix update".'
     echo 'run <prefix> <command>     Same as "prefix run".'
     echo 'tricks <prefix> <verbs>    Same as "prefix tricks".'
     echo 'clone <p1> <p2>            Same as "prefix clone".'
@@ -251,8 +252,10 @@ my_prefix_die_usage() {
     echo "Usage: $EXECNAME prefix <subcommand>"
     echo
     echo 'Subcommands:'
-    echo 'create <prefix> <options>    Create a WINE prefix using an installed'
+    echo 'create <prefix> <options>    Create a new WINE prefix using an installed'
     echo '                             package.'
+    echo 'update <prefix> <options>    Create a existing WINE prefix using an'
+    echo '                             installed package.'
     echo 'list [<regex>] [<options>]   List prefixes matching regular expressions.'
     echo '                             used. If no regular expressions provided,'
     echo '                             all results will be listed.'
@@ -346,6 +349,30 @@ my_prefix_create() {
     echo 'Prefix(es) successfully created.'
 }
 
+my_prefix_update() {
+    (( $# > 0 )) || my_prefix_die_usage
+    my_init_dirs
+    my_prefix_process_args "$@"
+    [[ -v 'options[pkg]' ]] \
+        || my_die_msg 'A package need to be specified to update a prefix.'
+    local prefix pkg="${options['pkg']}"
+    local wine_bin="$LOCAL_PKGDIR/$pkg/bin/wine"
+    (( ${#args[@]} > 0 )) \
+        || my_die_msg 'Expect prefix name(s) to update.'
+    for prefix in "${args[@]}"; do
+        if ! [[ -v "prefix_pkg[$prefix]" ]]; then
+            echo "Prefix $prefix does not exist. Skipping..."
+            continue
+        fi
+        echo "Updating prefix $prefix using $pkg..."
+        export WINEPREFIX="$LOCAL_PFXDIR/$prefix"
+        $wine_bin winepath \
+            || my_die_msg 'Error occurred when updating prefix.'
+        echo "$pkg" > "$WINEPREFIX/$PACKAGE_FILE"
+    done
+    echo 'Prefix(es) successfully updated.'
+}
+
 my_prefix_list() {
     my_init_dirs
     my_prefix_process_args "$@"
@@ -425,6 +452,8 @@ my_prefix() {
             my_prefix_die_usage 0;;
         ('create')
             shift; my_prefix_create "$@";;
+        ('update')
+            shift; my_prefix_update "$@";;
         ('list')
             shift; my_prefix_list "$@";;
         ('run')
@@ -457,6 +486,8 @@ main() {
             shift; my_prefix "$@";;
         ('create')
             shift; my_prefix_create "$@";;
+        ('update')
+            shift; my_prefix_update "$@";;
         ('run')
             shift; my_prefix_run "$@";;
         ('tricks')
