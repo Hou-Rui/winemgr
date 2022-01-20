@@ -314,8 +314,8 @@ my_prefix_filter_regexes() {
     for (( i = 0; i < ${#prefixes[@]}; i++ )); do
         local pfx="${prefixes[$i]}"
         local pkg="${packages[$i]}"
-        grep -Eq "$pfx_regex" <<< "$pfx" || continue
-        grep -Eq "$pkg_regex" <<< "$pkg" || continue
+        grep -Eq -- "$pfx_regex" <<< "$pfx" || continue
+        grep -Eq -- "$pkg_regex" <<< "$pkg" || continue
         prefixes_tmp+=("$pfx")
         packages_tmp+=("$pkg")
     done
