@@ -1,0 +1,471 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+EXECNAME="$(basename "$0")"
+
+readonly AUTHOR='Kron4ek'
+readonly REPO='Wine-Builds'
+readonly APIHOST="https://api.github.com/repos/$AUTHOR/$REPO/releases"
+readonly LOCAL_DIR="$HOME/.winemgr"
+readonly LOCAL_DLDDIR="$LOCAL_DIR/download"
+readonly LOCAL_PKGDIR="$LOCAL_DIR/packages"
+readonly LOCAL_PFXDIR="$LOCAL_DIR/prefixes"
+readonly PACKAGE_FILE='package.txt'
+readonly OLD_IFS="$IFS"
+
+declare -a remote_urls=()
+declare -A remote_pkg_url=()
+declare -a remote_pkgs=()
+declare -a remote_date=()
+declare -a local_pkgs=()
+declare -A local_ins=()
+declare -a local_ins_col=()
+
+my_exist_check() {
+    # Check if program is available
+    (( $# == 1 )) || return 1
+    local cmd="$1"
+    if ! which "$cmd" > /dev/null; then
+        echo "$cmd not installed. Aborting..."
+        exit 2
+    fi
+}
+
+my_perlmod_check() {
+    # check if Perl module is available
+    (( $# == 1 )) || return 1
+    local mod="$1"
+    if ! perldoc "$mod" > /dev/null; then
+        echo "Perl module $cmd not installed. Aborting..."
+        exit 2
+    fi
+}
+
+my_die_msg() {
+    # exit program with message
+    (( $# >= 1 )) || return 1
+    echo "$*"
+    exit 2
+}
+
+my_die_usage() {
+    # exit program with usage
+    echo "Usage: $EXECNAME <subcommand>"
+    echo
+    echo 'Subcommands:'
+    echo 'list [<regex>]             List remote packages matching a regular'
+    echo '                           expression. If no regular expression provided,'
+    echo '                           all results will be listed.'
+    echo 'install <package>          Install a package.'
+    echo 'remove <package>           Remove a package.'
+    echo 'create <prefix> <options>  Same as "prefix create".'
+    echo 'run <prefix> <command>     Same as "prefix run".'
+    echo 'tricks <prefix> <verbs>    Same as "prefix tricks".'
+    echo 'clone <p1> <p2>            Same as "prefix clone".'
+    echo 'help                       Display this help message.'
+    exit "${1:-1}"
+}
+
+my_jq_to_array() {
+    # convert json array to bash array
+    (( $# == 2 )) || return 1
+    local json_data="$1" key="$2"
+    echo "$json_data" | jq -r "[.[].$key] | @sh" | xargs
+}
+
+my_init_dirs() {
+    mkdir -p "$LOCAL_DLDDIR" "$LOCAL_PKGDIR" "$LOCAL_PFXDIR"
+}
+
+my_get_remote_list() {
+    # get information of remote packages
+    local jq_select jq_cmd json_data
+    # generate select clause
+    case $# in
+        (0) jq_select='';;
+        (*) jq_select="| select(.[].name | test(\"$*\"))";;
+    esac
+    # main `jq` command
+    jq_cmd='.[].assets[] | [{
+      url: .browser_download_url,
+      name: .name | sub(".tar.xz$"; ""),
+      date: .created_at
+    }]'
+    jq_cmd="$jq_cmd $jq_select"
+    json_data="$(curl -s "$APIHOST" | jq "$jq_cmd")"
+    # read from json to array
+    IFS=' '
+    read -ra remote_urls <<< "$(my_jq_to_array "$json_data" 'url')"
+    read -ra remote_pkgs <<< "$(my_jq_to_array "$json_data" 'name')"
+    read -ra remote_date <<< "$(my_jq_to_array "$json_data" 'date')"
+    IFS="$OLD_IFS"
+    # associate package name with download URL
+    for (( i = 0; i < ${#remote_urls[@]}; i++ )); do
+        local pkg="${remote_pkgs[$i]}"
+        local url="${remote_urls[$i]}"
+        remote_pkg_url["$pkg"]="$url"
+    done
+}
+
+my_get_local_list() {
+    # get list of installed package
+    readarray -t local_pkgs <<< "$(ls -1D "$LOCAL_PKGDIR")"
+    if [[ -z "${local_pkgs[*]}" ]]; then
+        local_pkgs=()
+        return
+    fi
+    local pkg
+    for pkg in "${local_pkgs[@]}"; do
+        # `local_ins` is only indirectly checked in `if -v`
+        # shellcheck disable=SC2034
+        local_ins["$pkg"]=1
+    done
+}
+
+my_print_table() {
+    # pretty print a table
+    # https://unix.stackexchange.com/a/311334
+    my_exist_check 'perl'
+    my_perlmod_check 'Text::ASCIITable'
+    perl -MText::ASCIITable -e '
+      $t = Text::ASCIITable->new({drawRowLine => 1});
+      while (defined($c = shift @ARGV) and $c ne "--") {
+        push @header, $c;
+        $cols++
+      }
+      $t->setCols(@header);
+      $rows = @ARGV / $cols;
+      for ($i = 0; $i < $rows; $i++) {
+        for ($j = 0; $j < $cols; $j++) {
+          $cell[$i][$j] = $ARGV[$j * $rows + $i]
+        }
+      }
+      $t->addRow(\@cell);
+      print $t' -- "$@"
+}
+
+my_build_local_ins_col() {
+    # build the install status column for table output
+    local pkg
+    for pkg in "${remote_pkgs[@]}"; do
+        if [[ -v "local_ins[$pkg]" ]]; then
+            local_ins_col+=('Installed')
+        else
+            local_ins_col+=('Not Installed')
+        fi
+    done
+}
+
+my_filter_installed_pkgs() {
+    # filter the table to keep only installed packages
+    declare -a remote_pkgs_tmp=()
+    declare -a remote_date_tmp=()
+    declare -a local_ins_col_tmp=()
+    for (( i = 0; i < ${#remote_pkgs[@]}; i++ )); do
+        if [[ "${local_ins_col[$i]}" == 'Installed' ]]; then
+            remote_pkgs_tmp+=("${remote_pkgs[$i]}")
+            remote_date_tmp+=("${remote_date[$i]}")
+            local_ins_col_tmp+=("${local_ins_col[$i]}")
+        fi
+    done
+    IFS=' '
+    read -ra remote_pkgs <<< "${remote_pkgs_tmp[@]}"
+    read -ra remote_date <<< "${remote_date_tmp[@]}"
+    read -ra local_ins_col <<< "${local_ins_col_tmp[@]}"
+    IFS="$OLD_IFS"
+}
+
+my_list() {
+    # execute `list` subcommand
+    my_init_dirs
+    local only_installed=0
+    if (( $# >= 1 )) && [[ "$1" = "--installed" ]]; then
+        only_installed=1
+        echo 'Only displaying installed packages.'
+        shift
+    fi
+    my_get_remote_list "$@"
+    my_get_local_list
+    my_build_local_ins_col
+    [[ "$only_installed" = '1' ]] && my_filter_installed_pkgs
+    echo "${#remote_pkgs[@]} package(s) available."
+    (( ${#remote_pkgs[@]} == 0 )) && return
+    my_print_table 'Package' 'Date' 'Status' -- \
+        "${remote_pkgs[@]}" "${remote_date[@]}" "${local_ins_col[@]}"
+}
+
+my_install() {
+    # execute `install` subcommand
+    my_init_dirs
+    (( $# == 1 )) || my_die_usage
+    local pkg="$1"
+    my_get_remote_list
+    my_get_local_list
+    [[ -v "remote_pkg_url[$pkg]" ]] \
+        || my_die_msg "Package $pkg not found in repository."
+    [[ -v "local_ins[$pkg]" ]] \
+        && my_die_msg "Package $pkg is already installed."
+    echo "Downloading $pkg..."
+    local url="${remote_pkg_url[$pkg]}"
+    curl -L "$url" -o "$LOCAL_DLDDIR/$pkg.tar.xz" \
+        || my_die_msg "Error occurred when downloading packages."
+    tar -xf "$LOCAL_DLDDIR/$pkg.tar.xz" -C "$LOCAL_PKGDIR" \
+        || my_die_msg "Error occurred when extracting packages."
+    echo "$pkg has been successfully installed."
+}
+
+my_check_prefix_dep() {
+    # Check if any prefix depends on this package
+    (( $# == 1 )) || return 1
+    local pkg="$1" dep_prefixes_str
+    my_prefix_get_local_prefixes
+    declare -a dep_prefixes
+    for (( i = 0; i < ${#prefixes[@]}; i++ )); do
+        [[ "$pkg" == "${packages[$i]}" ]] \
+            && dep_prefixes+=("${prefixes[$i]}")
+    done
+    if (( ${#dep_prefixes[@]} != 0 )); then
+        dep_prefixes_str="$(printf ", %s" "${dep_prefixes[@]}")"
+        dep_prefixes_str="${dep_prefixes:2}"
+        my_die_msg "Prefix(es) $dep_prefixes_str depend(s) on package $pkg." \
+            "Remove them before remove this package."
+    fi
+}
+
+my_remove() {
+    # execute `remove` subcommand
+    my_init_dirs
+    (( $# == 1 )) || my_die_usage
+    local pkg="$1"
+    my_get_local_list
+    [[ -v "local_ins[$pkg]" ]] \
+        || my_die_msg "Package $pkg is not installed."
+    my_check_prefix_dep "$pkg"
+    rm -r "${LOCAL_PKGDIR:?}/$pkg" \
+        || my_die_msg "Error occurred when removing packages."
+    echo "$pkg has been successfully removed."
+}
+
+my_prefix_die_usage() {
+    echo "Usage: $EXECNAME prefix <subcommand>"
+    echo
+    echo 'Subcommands:'
+    echo 'create <prefix> <options>    Create a WINE prefix using an installed'
+    echo '                             package.'
+    echo 'list [<regex>] [<options>]   List prefixes matching regular expressions.'
+    echo '                             used. If no regular expressions provided,'
+    echo '                             all results will be listed.'
+    echo 'run <prefix> [<cmd>...]      Run Windows program using a prefix.'
+    echo 'tricks <prefix> [<verb>...]  Apply Winetricks on the prefix.'
+    echo 'clone <prefix 1> <prefix 2>  Clone a prefix.'
+    echo 'remove <prefix>              Remove a prefix.'
+    echo 'uninstall <prefix>           Remove a prefix.'
+    echo 'help                         Display this help message.'
+    echo
+    echo 'Options:'
+    echo '--package, --pkg, -p         Use a specific package to perform the'
+    echo '                             operation.'
+    exit "${1:-1}"
+}
+
+declare -A options=()
+declare -a args=()
+declare -a prefixes=()
+declare -a packages=()
+declare -A prefix_pkg=()
+
+my_prefix_process_args() {
+    while (( $# > 0 )); do
+        case "$1" in
+            ('-p' | '--pkg' | '--package')
+                (( $# > 1 )) || my_die_msg "Expect package name after $1."
+                shift; options['pkg']="$1";;
+            (*)
+                args+=("$1");;
+        esac
+        shift
+    done
+}
+
+my_prefix_get_local_prefixes() {
+    local prefix pkg
+    readarray -t prefixes <<< "$(ls -1D "$LOCAL_PFXDIR")"
+    if [[ -z "${prefixes[*]}" ]]; then
+        prefixes=()
+        return
+    fi
+    for prefix in "${prefixes[@]}"; do
+        pkg="$(cat "$LOCAL_PFXDIR/$prefix/$PACKAGE_FILE")"
+        packages+=("$pkg")
+        # `prefix_pkg` is only indirectly checked in `if -v`
+        # shellcheck disable=SC2034
+        prefix_pkg["$prefix"]="$pkg"
+    done
+}
+
+my_prefix_filter_regexes() {
+    (( $# == 2 )) || return 1
+    local pfx_regex="$1" pkg_regex="$2"
+    declare -a prefixes_tmp=() packages_tmp=()
+    for (( i = 0; i < ${#prefixes[@]}; i++ )); do
+        local pfx="${prefixes[$i]}"
+        local pkg="${packages[$i]}"
+        grep -Eq "$pfx_regex" <<< "$pfx" || continue
+        grep -Eq "$pkg_regex" <<< "$pkg" || continue
+        prefixes_tmp+=("$pfx")
+        packages_tmp+=("$pkg")
+    done
+    IFS=' '
+    read -ra prefixes <<< "${prefixes_tmp[@]}"
+    read -ra packages <<< "${packages_tmp[@]}"
+    IFS="$OLD_IFS"
+}
+
+my_prefix_create() {
+    (( $# > 0 )) || my_prefix_die_usage
+    my_init_dirs
+    my_prefix_process_args "$@"
+    [[ -v 'options[pkg]' ]] \
+        || my_die_msg 'A package need to be specified to create a prefix.'
+    local prefix pkg="${options['pkg']}"
+    local wine_bin="$LOCAL_PKGDIR/$pkg/bin/wine"
+    (( ${#args[@]} > 0 )) \
+        || my_die_msg 'Expect prefix name(s) to create.'
+    for prefix in "${args[@]}"; do
+        if [[ -v "prefix_pkg[$prefix]" ]]; then
+            echo "Prefix $prefix already exists. Skipping..."
+            continue
+        fi
+        echo "Creating prefix $prefix using $pkg..."
+        export WINEPREFIX="$LOCAL_PFXDIR/$prefix"
+        $wine_bin winepath \
+            || my_die_msg 'Error occurred when creating prefix.'
+        echo "$pkg" > "$WINEPREFIX/$PACKAGE_FILE"
+    done
+    echo 'Prefix(es) successfully created.'
+}
+
+my_prefix_list() {
+    my_init_dirs
+    my_prefix_process_args "$@"
+    my_prefix_get_local_prefixes
+    local pfx_regex="${args[*]}"
+    local pkg_regex="${options['pkg']:-.*}"
+    my_prefix_filter_regexes "$pfx_regex" "$pkg_regex"
+    echo "${#prefixes[@]} prefix(es) available."
+    (( ${#prefixes[@]} == 0 )) && return
+    my_print_table 'Prefix' 'Package' -- \
+        "${prefixes[@]}" "${packages[@]}"
+}
+
+my_prefix_run() {
+    my_init_dirs
+    my_prefix_get_local_prefixes
+    case $# in
+        (0) my_die_msg 'Expect prefix name after "run".';;
+        (1) my_die_msg 'Expect command after prefix name.';;
+    esac
+    local prefix="$1"; shift
+    [[ -v "prefix_pkg[$prefix]" ]] \
+        || my_die_msg "Prefix $prefix does not exist."
+    local pkg="${prefix_pkg["$prefix"]}"
+    export WINEPREFIX="$LOCAL_PFXDIR/$prefix"
+    local wine_bin="$LOCAL_PKGDIR/$pkg/bin/wine"
+    $wine_bin "$*"
+}
+
+my_prefix_tricks() {
+    my_exist_check 'winetricks'
+    my_init_dirs
+    my_prefix_get_local_prefixes
+    case $# in
+        (0) my_die_msg 'Expect prefix name after "tricks".';;
+        (1) my_die_msg 'Expect verbs after prefix name.';;
+    esac
+    local prefix="$1"; shift
+    [[ -v "prefix_pkg[$prefix]" ]] \
+        || my_die_msg "Prefix $prefix does not exist."
+    local pkg="${prefix_pkg["$prefix"]}"
+    export WINEPREFIX="$LOCAL_PFXDIR/$prefix"
+    export WINE="$LOCAL_PKGDIR/$pkg/bin/wine"
+    winetricks "$*"
+    echo "Successfully applied winetricks on prefix \"$prefix\"."
+}
+
+my_prefix_clone() {
+    my_init_dirs
+    my_prefix_get_local_prefixes
+    (( $# == 2 )) || my_die_msg 'Expect source and destination prefix names.'
+    local prefix_src="$1" prefix_dest="$2"
+    [[ -v "prefix_pkg[$prefix_src]" ]] \
+        || my_die_msg "Prefix $prefix_src does not exist."
+    cp -r "$LOCAL_PFXDIR/$prefix_src" "$LOCAL_PFXDIR/$prefix_dest" \
+        || my_die_msg 'Error occurred cloning prefixes.'
+    echo 'Successfully clone prefix(es).'
+}
+
+my_prefix_remove() {
+    my_init_dirs
+    my_prefix_get_local_prefixes
+    (( $# > 0 )) || my_die_msg 'Expect prefix names after "remove".'
+    local prefix
+    for prefix in "$@"; do
+        echo "Removing $prefix..."
+        rm -r "${LOCAL_PFXDIR:?}/$prefix" \
+            || my_die_msg 'Error occurred when removing prefix(es).'
+    done
+    echo 'Successfully removed prefix(es).'
+}
+
+my_prefix() {
+    (( $# == 0 )) && my_prefix_die_usage
+    case "$1" in
+        ('help' | '-h' | '--help')
+            my_prefix_die_usage 0;;
+        ('create')
+            shift; my_prefix_create "$@";;
+        ('list')
+            shift; my_prefix_list "$@";;
+        ('run')
+            shift; my_prefix_run "$@";;
+        ('tricks')
+            shift; my_prefix_tricks "$@";;
+        ('clone')
+            shift; my_prefix_clone "$@";;
+        ('remove' | 'uninstall')
+            shift; my_prefix_remove "$@";;
+        (*)
+            my_prefix_die_usage;;
+    esac
+}
+
+main() {
+    (( $# >= 1 )) || my_die_usage
+    my_exist_check 'curl'
+    my_exist_check 'jq'
+    case "$1" in
+        ('help' | '-h' | '--help')
+            my_die_usage 0;;
+        ('list')
+            shift; my_list "$@";;
+        ('install')
+            shift; my_install "$@";;
+        ('remove' | 'uninstall')
+            shift; my_remove "$@";;
+        ('prefix')
+            shift; my_prefix "$@";;
+        ('create')
+            shift; my_prefix_create "$@";;
+        ('run')
+            shift; my_prefix_run "$@";;
+        ('tricks')
+            shift; my_prefix_tricks "$@";;
+        ('clone')
+            shift; my_prefix_clone "$@";;
+        (*) my_die_usage;;
+    esac
+}
+
+main "$@"
+
