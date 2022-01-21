@@ -416,7 +416,7 @@ my_prefix_tricks() {
     local pkg="${prefix_pkg["$prefix"]}"
     export WINEPREFIX="$LOCAL_PFXDIR/$prefix"
     export WINE="$LOCAL_PKGDIR/$pkg/bin/wine"
-    winetricks "$*"
+    winetricks "$@"
     echo "Successfully applied winetricks on prefix \"$prefix\"."
 }
 
