@@ -257,8 +257,8 @@ my_prefix_die_usage() {
     echo 'update <prefix> <options>    Create a existing WINE prefix using an'
     echo '                             installed package.'
     echo 'list [<regex>] [<options>]   List prefixes matching regular expressions.'
-    echo '                             If no regular expressions provided, all'
-    echo '                             results will be listed.'
+    echo '                             used. If no regular expressions provided,'
+    echo '                             all results will be listed.'
     echo 'run <prefix> [<cmd>...]      Run Windows program using a prefix.'
     echo 'tricks <prefix> [<verb>...]  Apply Winetricks on the prefix.'
     echo 'clone <prefix 1> <prefix 2>  Clone a prefix.'
@@ -399,7 +399,7 @@ my_prefix_run() {
     local pkg="${prefix_pkg["$prefix"]}"
     export WINEPREFIX="$LOCAL_PFXDIR/$prefix"
     local wine_bin="$LOCAL_PKGDIR/$pkg/bin/wine"
-    $wine_bin "$*"
+    "$wine_bin" "$@"
 }
 
 my_prefix_tricks() {
