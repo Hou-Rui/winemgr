@@ -357,6 +357,7 @@ my_prefix_create() {
     (( $# > 0 )) || my_prefix_die_usage
     my_init_dirs
     my_prefix_process_args "$@"
+    my_prefix_get_local_prefixes
     [[ -v 'options[pkg]' ]] \
         || my_die_msg 'A package need to be specified to create a prefix.'
     local prefix pkg="${options['pkg']}"
@@ -381,6 +382,7 @@ my_prefix_update() {
     (( $# > 0 )) || my_prefix_die_usage
     my_init_dirs
     my_prefix_process_args "$@"
+    my_prefix_get_local_prefixes
     [[ -v 'options[pkg]' ]] \
         || my_die_msg 'A package need to be specified to update a prefix.'
     local prefix pkg="${options['pkg']}"
