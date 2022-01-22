@@ -55,18 +55,19 @@ my_die_usage() {
     echo "Usage: $EXECNAME <subcommand>"
     echo
     echo 'Subcommands:'
-    echo 'list [<regex>]             List remote packages matching a regular'
-    echo '                           expression. If no regular expression provided,'
-    echo '                           all results will be listed.'
-    echo 'install <package>          Install a package.'
-    echo 'remove <package>           Remove a package.'
-    echo 'cache                      Update cache.'
-    echo 'create <prefix> <options>  Same as "prefix create".'
-    echo 'update <prefix> <options>  Same as "prefix update".'
-    echo 'run <prefix> <command>     Same as "prefix run".'
-    echo 'tricks <prefix> <verbs>    Same as "prefix tricks".'
-    echo 'clone <p1> <p2>            Same as "prefix clone".'
-    echo 'help                       Display this help message.'
+    echo 'list [<regex>]                List remote packages matching a regular'
+    echo '                              expression. If no regular expression'
+    echo '                              provided, all results will be listed.'
+    echo 'install <package>             Install a package.'
+    echo 'remove <package>              Remove a package.'
+    echo 'cache                         Update cache.'
+    echo 'create <prefix> <options>     Same as "prefix create".'
+    echo 'update <prefix> <options>     Same as "prefix update".'
+    echo 'run <prefix> <command>        Same as "prefix run".'
+    echo 'tricks <prefix> <verbs>       Same as "prefix tricks".'
+    echo 'clone <prefix 1> <prefix 2>   Same as "prefix clone".'
+    echo 'rename <prefix 1> <prefix 2>  Same as "prefix rename".'
+    echo 'help                          Display this help message.'
     exit "${1:-1}"
 }
 
@@ -278,19 +279,20 @@ my_prefix_die_usage() {
     echo "Usage: $EXECNAME prefix <subcommand>"
     echo
     echo 'Subcommands:'
-    echo 'create <prefix> <options>    Create a new WINE prefix using an installed'
-    echo '                             package.'
-    echo 'update <prefix> <options>    Create a existing WINE prefix using an'
-    echo '                             installed package.'
-    echo 'list [<regex>] [<options>]   List prefixes matching regular expressions.'
-    echo '                             used. If no regular expressions provided,'
-    echo '                             all results will be listed.'
-    echo 'run <prefix> [<cmd>...]      Run Windows program using a prefix.'
-    echo 'tricks <prefix> [<verb>...]  Apply Winetricks on the prefix.'
-    echo 'clone <prefix 1> <prefix 2>  Clone a prefix.'
-    echo 'remove <prefix>              Remove a prefix.'
-    echo 'uninstall <prefix>           Remove a prefix.'
-    echo 'help                         Display this help message.'
+    echo 'create <prefix> <options>     Create a new WINE prefix using an installed'
+    echo '                              package.'
+    echo 'update <prefix> <options>     Create a existing WINE prefix using an'
+    echo '                              installed package.'
+    echo 'list [<regex>] [<options>]    List prefixes matching regular expressions.'
+    echo '                              used. If no regular expressions provided,'
+    echo '                              all results will be listed.'
+    echo 'run <prefix> [<cmd>...]       Run Windows program using a prefix.'
+    echo 'tricks <prefix> [<verb>...]   Apply Winetricks on the prefix.'
+    echo 'clone <prefix 1> <prefix 2>   Clone a prefix.'
+    echo 'rename <prefix 1> <prefix 2>  Rename a prefix.'
+    echo 'remove <prefix>               Remove a prefix.'
+    echo 'uninstall <prefix>            Remove a prefix.'
+    echo 'help                          Display this help message.'
     echo
     echo 'Options:'
     echo '--package, --pkg, -p         Use a specific package to perform the'
@@ -458,6 +460,18 @@ my_prefix_clone() {
     echo 'Successfully clone prefix(es).'
 }
 
+my_prefix_rename() {
+    my_init_dirs
+    my_prefix_get_local_prefixes
+    (( $# == 2 )) || my_die_msg 'Expect old and new prefix names.'
+    local prefix_old="$1" prefix_new="$2"
+    [[ -v "prefix_pkg[$prefix_old]" ]] \
+        || my_die_msg "Prefix $prefix_old does not exist."
+    mv "$LOCAL_PFXDIR/$prefix_old" "$LOCAL_PFXDIR/$prefix_new" \
+        || my_die_msg 'Error occurred renaming prefixes.'
+    echo 'Successfully rename prefix(es).'
+}
+
 my_prefix_remove() {
     my_init_dirs
     my_prefix_get_local_prefixes
@@ -488,6 +502,8 @@ my_prefix() {
             shift; my_prefix_tricks "$@";;
         ('clone')
             shift; my_prefix_clone "$@";;
+        ('rename')
+            shift; my_prefix_rename "$@";;
         ('remove' | 'uninstall')
             shift; my_prefix_remove "$@";;
         (*)
@@ -522,6 +538,8 @@ main() {
             shift; my_prefix_tricks "$@";;
         ('clone')
             shift; my_prefix_clone "$@";;
+        ('rename')
+            shift; my_prefix_rename "$@";;
         (*) my_die_usage;;
     esac
 }
