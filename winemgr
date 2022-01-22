@@ -12,6 +12,7 @@ readonly LOCAL_DLDDIR="$LOCAL_DIR/download"
 readonly LOCAL_PKGDIR="$LOCAL_DIR/packages"
 readonly LOCAL_PFXDIR="$LOCAL_DIR/prefixes"
 readonly PACKAGE_FILE='package.txt'
+readonly CACHE_FILE="$LOCAL_DIR/cache.json"
 readonly OLD_IFS="$IFS"
 
 declare -a remote_urls=()
@@ -59,6 +60,7 @@ my_die_usage() {
     echo '                           all results will be listed.'
     echo 'install <package>          Install a package.'
     echo 'remove <package>           Remove a package.'
+    echo 'cache                      Update cache.'
     echo 'create <prefix> <options>  Same as "prefix create".'
     echo 'update <prefix> <options>  Same as "prefix update".'
     echo 'run <prefix> <command>     Same as "prefix run".'
@@ -94,7 +96,8 @@ my_get_remote_list() {
       date: .created_at
     }]'
     jq_cmd="$jq_cmd $jq_select"
-    json_data="$(curl -s "$APIHOST" | jq "$jq_cmd")"
+    [[ "$(my_cache_up_to_date)" != '1' ]] && my_cache
+    json_data="$(cat "$CACHE_FILE" | jq "$jq_cmd")"
     # read from json to array
     IFS=' '
     read -ra remote_urls <<< "$(my_jq_to_array "$json_data" 'url')"
@@ -246,6 +249,29 @@ my_remove() {
     rm -r "${LOCAL_PKGDIR:?}/$pkg" \
         || my_die_msg "Error occurred when removing packages."
     echo "$pkg has been successfully removed."
+}
+
+my_cache_up_to_date() {
+    my_init_dirs
+    if ! [[ -f "$CACHE_FILE" ]]; then
+        echo '0'; return
+    fi
+    local mod_date="$(date -r $CACHE_FILE +%s)"
+    local now_date="$(date +%s)"
+    local delta_days="$(( ($now_date - $mod_date) / 86400 ))"
+    if (( $delta_days >= 7 )); then
+        echo '0'; return
+    fi
+    echo '1'
+}
+
+my_cache() {
+    my_init_dirs
+    echo 'Updating cache...'
+    (( $# == 0 )) || my_die_usage
+    curl -s "$APIHOST" -o "$CACHE_FILE" \
+        || my_die_msg 'Error updating cache.'
+    echo 'Successfully update cache.'
 }
 
 my_prefix_die_usage() {
@@ -482,6 +508,8 @@ main() {
             shift; my_install "$@";;
         ('remove' | 'uninstall')
             shift; my_remove "$@";;
+        ('cache')
+            shift; my_cache "$@";;
         ('prefix')
             shift; my_prefix "$@";;
         ('create')
