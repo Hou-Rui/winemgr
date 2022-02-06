@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+if [[ "$BASH_VERSION" < 4 ]]; then
+    echo 'This program requires GNU bash 4.0 or above to run.'
+    echo "Your bash version is too low ($BASH_VERSION)."
+    exit 1
+fi
+
 set -euo pipefail
 
 EXECNAME="$(basename "$0")"
