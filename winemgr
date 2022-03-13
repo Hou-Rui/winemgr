@@ -236,7 +236,7 @@ my_check_prefix_dep() {
         [[ "$pkg" == "${packages[$i]}" ]] \
             && dep_prefixes+=("${prefixes[$i]}")
     done
-    if (( ${#dep_prefixes[@]} != 0 )); then
+    if (( -n ${dep_prefixes+'x'} )); then
         dep_prefixes_str="$(printf ", %s" "${dep_prefixes[@]}")"
         dep_prefixes_str="${dep_prefixes_str:2}"
         my_die_msg "Prefix(es) $dep_prefixes_str depend(s) on package $pkg." \
